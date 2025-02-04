@@ -31,6 +31,12 @@ forge build
 forge test
 ```
 
+### Deployment
+
+We have built a [portal](https://kernel-deployments-status.onrender.com) for deploying Kernel on any network.
+
+If you don't see a network, feel free to open an issue.
+
 ## License
 
 MIT
