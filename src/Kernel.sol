@@ -51,8 +51,6 @@ import {InstallExecutorDataFormat, InstallFallbackDataFormat, InstallValidatorDa
 
 import {ECDSA} from "solady/utils/ECDSA.sol";
 
-import "forge-std/console.sol";
-
 contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager {
     error ExecutionReverted();
     error InvalidExecutor();
@@ -99,10 +97,6 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         } else {
             _;
         }
-    }
-
-    function mockCode() external {
-        console.logBytes(address(this).code);
     }
 
     function initialize(
