@@ -40,6 +40,7 @@ import {
     VALIDATION_TYPE_ROOT,
     VALIDATION_TYPE_VALIDATOR,
     VALIDATION_TYPE_PERMISSION,
+    VALIDATION_TYPE_7702,
     SKIP_USEROP,
     SKIP_SIGNATURE,
     VALIDATION_MANAGER_STORAGE_SLOT,
@@ -48,6 +49,8 @@ import {
     KERNEL_WRAPPER_TYPE_HASH,
     MAGIC_VALUE_SIG_REPLAYABLE
 } from "../types/Constants.sol";
+
+import {ECDSA} from "solady/utils/ECDSA.sol";
 
 abstract contract ValidationManager is EIP712, SelectorManager, HookManager, ExecutorManager {
     event RootValidatorUpdated(ValidationId rootValidator);
@@ -322,7 +325,7 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
                     validationData,
                     ValidationData.wrap(ValidatorLib.getValidator(vId).validateUserOp(userOp, userOpHash))
                 );
-            } else {
+            } else if (vType == VALIDATION_TYPE_PERMISSION) {
                 PermissionId pId = ValidatorLib.getPermissionId(vId);
                 if (PassFlag.unwrap(state.permissionConfig[pId].permissionFlag) & PassFlag.unwrap(SKIP_USEROP) != 0) {
                     revert PermissionNotAlllowedForUserOp();
@@ -335,6 +338,12 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
                         signer.checkUserOpSignature(bytes32(PermissionId.unwrap(pId)), userOp, userOpHash)
                     )
                 );
+            } else if (vType == VALIDATION_TYPE_7702) {
+                validationData = ECDSA.recover(userOpHash, userOpSig) == address(this)
+                    ? ValidationData.wrap(0)
+                    : ValidationData.wrap(1);
+            } else {
+                revert InvalidValidationType();
             }
         }
     }
@@ -416,6 +425,8 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
             ISigner signer;
             (signer, validationData, enableSig) = _checkSignaturePolicy(pId, address(this), digest, enableSig);
             result = signer.checkSignature(bytes32(PermissionId.unwrap(pId)), address(this), digest, enableSig);
+        } else if (vType == VALIDATION_TYPE_7702) {
+            result = ECDSA.recover(digest, enableSig) == address(this) ? bytes4(0x1626ba7e) : bytes4(0xffffffff);
         } else {
             revert InvalidValidationType();
         }
@@ -470,7 +481,8 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
     ) internal view returns (ValidationConfig memory config, bytes32 digest) {
         ValidationStorage storage state = _validationStorage();
         config.hook = IHook(hook);
-        config.nonce = state.currentNonce;
+        config.nonce =
+            state.validationConfig[vId].nonce == state.currentNonce ? state.currentNonce + 1 : state.currentNonce;
 
         bytes32 structHash = keccak256(
             abi.encode(

@@ -38,6 +38,7 @@ ValidationMode constant VALIDATION_MODE_INSTALL = ValidationMode.wrap(0x02);
 
 // --- Kernel validation types ---
 ValidationType constant VALIDATION_TYPE_ROOT = ValidationType.wrap(0x00);
+ValidationType constant VALIDATION_TYPE_7702 = ValidationType.wrap(0x00);
 ValidationType constant VALIDATION_TYPE_VALIDATOR = ValidationType.wrap(0x01);
 ValidationType constant VALIDATION_TYPE_PERMISSION = ValidationType.wrap(0x02);
 

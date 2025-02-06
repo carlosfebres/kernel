@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "../Kernel.sol";
-import "../factory/KernelFactory.sol";
-import "../factory/FactoryStaker.sol";
+import "src/Kernel.sol";
+import "src/factory/KernelFactory.sol";
+import "src/factory/FactoryStaker.sol";
 import "solady_test/utils/TestPlus.sol";
 import "forge-std/Test.sol";
+import "../mock/MockCallee.sol";
 import "../mock/MockValidator.sol";
 import "../mock/MockPolicy.sol";
 import "../mock/MockSigner.sol";
@@ -16,32 +17,11 @@ import "../mock/MockFallback.sol";
 import "../mock/MockERC20.sol";
 import "../mock/MockERC721.sol";
 import "../mock/MockERC1155.sol";
-import "../core/ValidationManager.sol";
-import "./TestBase/erc4337Util.sol";
-import "../types/Types.sol";
-import "../types/Structs.sol";
+import "src/core/ValidationManager.sol";
+import "./erc4337Util.sol";
+import "src/types/Types.sol";
+import "src/types/Structs.sol";
 import "solady/accounts/LibERC7579.sol";
-
-contract MockCallee {
-    uint256 public value;
-
-    event MockEvent(address indexed caller, address indexed here);
-
-    function setValue(uint256 _value) public {
-        value = _value;
-    }
-
-    function addValue(uint256 _value) public {
-        value += _value;
-    }
-
-    function emitEvent(bool shouldFail) public {
-        if (shouldFail) {
-            revert("Hello");
-        }
-        emit MockEvent(msg.sender, address(this));
-    }
-}
 
 abstract contract KernelTestBase is TestPlus, Test {
     address stakerOwner;

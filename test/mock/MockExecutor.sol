@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IExecutor} from "../interfaces/IERC7579Modules.sol";
-import {IERC7579Account, ExecMode} from "../interfaces/IERC7579Account.sol";
+import {IExecutor} from "src/interfaces/IERC7579Modules.sol";
+import {IERC7579Account, ExecMode} from "src/interfaces/IERC7579Account.sol";
 
 contract MockExecutor is IExecutor {
     mapping(address => bytes) public data;
