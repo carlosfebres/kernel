@@ -49,8 +49,6 @@ import {
 
 import {InstallExecutorDataFormat, InstallFallbackDataFormat, InstallValidatorDataFormat} from "./types/Structs.sol";
 
-import {ECDSA} from "solady/utils/ECDSA.sol";
-
 contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager {
     error ExecutionReverted();
     error InvalidExecutor();
@@ -238,7 +236,6 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         // 2. instead of packing 20 bytes in userOp.signature for enable mode to provide the validator address, v3 uses userOp.nonce[2:22]
         // 3. In v2, only 1 plugin validator(aside from root validator) can access the selector.
         //    In v3, you can use more than 1 plugin to use the exact selector, you need to specify the validator address in userOp.nonce[2:22] to use the validator
-
         (ValidationMode vMode, ValidationType vType, ValidationId vId) = ValidatorLib.decodeNonce(userOp.nonce);
         if (vType == VALIDATION_TYPE_ROOT) {
             vId = vs.rootValidator;
@@ -349,9 +346,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
             }
             return _checkPermissionSignature(pId, msg.sender, hash, sig, isReplayable);
         } else if (vType == VALIDATION_TYPE_7702) {
-            return ECDSA.recover(_toWrappedHash(hash, isReplayable), sig) == address(this)
-                ? ERC1271_MAGICVALUE
-                : ERC1271_INVALID;
+            return _verify7702Signature(_toWrappedHash(hash, isReplayable), sig);
         } else {
             revert InvalidValidationType();
         }
@@ -398,23 +393,17 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
             }
             _installSelector(bytes4(initData[0:4]), module, IHook(address(bytes20(initData[4:24]))), data.selectorData);
             _installHook(IHook(address(bytes20(initData[4:24]))), data.hookData);
-        } else if (moduleType == MODULE_TYPE_HOOK) {
-            // force call onInstall for hook
+        } else if (
+            moduleType == MODULE_TYPE_HOOK || moduleType == MODULE_TYPE_POLICY || moduleType == MODULE_TYPE_SIGNER
+        ) {
+            // force call onInstall for hook, policy, signer
             // NOTE: for hook, kernel does not support independent hook install,
-            // hook is expected to be paired with proper validator/executor/selector
-            IHook(module).onInstall(initData);
-        } else if (moduleType == MODULE_TYPE_POLICY) {
-            // force call onInstall for policy
             // NOTE: for policy, kernel does not support independent policy install,
+            // NOTE: for signer, kernel does not support independent signer install,
+            // hook is expected to be paired with proper validator/executor/selector
             // policy is expected to be paired with proper permissionId
             // to "ADD" permission, use "installValidations()" function
-            IPolicy(module).onInstall(initData);
-        } else if (moduleType == MODULE_TYPE_SIGNER) {
-            // force call onInstall for signer
-            // NOTE: for signer, kernel does not support independent signer install,
-            // signer is expected to be paired with proper permissionId
-            // to "ADD" permission, use "installValidations()" function
-            ISigner(module).onInstall(initData);
+            IHook(module).onInstall(initData);
         } else {
             revert InvalidModuleType();
         }

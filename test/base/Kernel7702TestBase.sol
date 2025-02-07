@@ -27,7 +27,6 @@ contract Kernel7702TestBase is TestPlus, Test {
     Kernel kernel;
     uint256 privateKey;
     IEntryPoint entrypoint;
-    ValidationId rootValidation;
 
     struct RootValidationConfig {
         IHook hook;
@@ -35,7 +34,6 @@ contract Kernel7702TestBase is TestPlus, Test {
         bytes hookData;
     }
 
-    RootValidationConfig rootValidationConfig;
     MockValidator mockValidator;
     MockCallee callee;
     MockHook mockHook;
@@ -305,7 +303,6 @@ contract Kernel7702TestBase is TestPlus, Test {
         mockERC20 = new MockERC20();
         mockERC721 = new MockERC721();
         mockERC1155 = new MockERC1155();
-        _setRootValidationConfig();
         _setEnableValidatorConfig();
         _setEnablePermissionConfig();
         (address acc, uint256 pk) = makeAddrAndKey("Account");
@@ -364,11 +361,6 @@ contract Kernel7702TestBase is TestPlus, Test {
     }
 
     // things to override on test
-    function _setRootValidationConfig() internal virtual {
-        mockValidator = new MockValidator();
-        rootValidation = ValidatorLib.validatorToIdentifier(mockValidator);
-    }
-
     function _setEnableValidatorConfig() internal virtual {
         enabledValidator = new MockValidator();
     }

@@ -47,6 +47,8 @@ import {
     MAX_NONCE_INCREMENT_SIZE,
     ENABLE_TYPE_HASH,
     KERNEL_WRAPPER_TYPE_HASH,
+    ERC1271_INVALID,
+    ERC1271_MAGICVALUE,
     MAGIC_VALUE_SIG_REPLAYABLE
 } from "../types/Constants.sol";
 
@@ -339,7 +341,7 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
                     )
                 );
             } else if (vType == VALIDATION_TYPE_7702) {
-                validationData = ECDSA.recover(userOpHash, userOpSig) == address(this)
+                validationData = _verify7702Signature(userOpHash, userOpSig) == ERC1271_MAGICVALUE
                     ? ValidationData.wrap(0)
                     : ValidationData.wrap(1);
             } else {
@@ -426,11 +428,11 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
             (signer, validationData, enableSig) = _checkSignaturePolicy(pId, address(this), digest, enableSig);
             result = signer.checkSignature(bytes32(PermissionId.unwrap(pId)), address(this), digest, enableSig);
         } else if (vType == VALIDATION_TYPE_7702) {
-            result = ECDSA.recover(digest, enableSig) == address(this) ? bytes4(0x1626ba7e) : bytes4(0xffffffff);
+            result = _verify7702Signature(digest, enableSig);
         } else {
             revert InvalidValidationType();
         }
-        if (result != 0x1626ba7e) {
+        if (result != ERC1271_MAGICVALUE) {
             revert EnableNotApproved();
         }
     }
@@ -497,6 +499,10 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         );
 
         digest = isReplayable ? _chainAgnosticHashTypedData(structHash) : _hashTypedData(structHash);
+    }
+
+    function _verify7702Signature(bytes32 hash, bytes calldata sig) internal view returns (bytes4) {
+        return ECDSA.recover(hash, sig) == address(this) ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 
     function _checkUserOpPolicy(PermissionId pId, PackedUserOperation memory userOp, bytes calldata userOpSig)
@@ -606,7 +612,7 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
             _checkSignaturePolicy(pId, caller, hash, sig);
         (ValidAfter validAfter, ValidUntil validUntil,) = parseValidationData(ValidationData.unwrap(valdiationData));
         if (block.timestamp < ValidAfter.unwrap(validAfter) || block.timestamp > ValidUntil.unwrap(validUntil)) {
-            return 0xffffffff;
+            return ERC1271_INVALID;
         }
         return signer.checkSignature(
             bytes32(PermissionId.unwrap(pId)), caller, _toWrappedHash(hash, isReplayable), validatorSig
