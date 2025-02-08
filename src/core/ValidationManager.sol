@@ -43,6 +43,9 @@ import {
     VALIDATION_TYPE_7702,
     SKIP_USEROP,
     SKIP_SIGNATURE,
+    HOOK_MODULE_NOT_INSTALLED,
+    HOOK_MODULE_INSTALLED,
+    HOOK_ONLY_ENTRYPOINT,
     VALIDATION_MANAGER_STORAGE_SLOT,
     MAX_NONCE_INCREMENT_SIZE,
     ENABLE_TYPE_HASH,
@@ -167,34 +170,22 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         }
     }
 
-    function _setSelector(ValidationId vId, bytes4 selector, bool allowed) internal {
+    function _grantAccess(ValidationId vId, bytes4 selector, bool allow) internal {
         ValidationStorage storage state = _validationStorage();
-        state.allowedSelectors[vId][selector] = allowed;
-        emit SelectorSet(selector, vId, allowed);
+        state.allowedSelectors[vId][selector] = allow;
+        emit SelectorSet(selector, vId, allow);
     }
 
     // for uninstall, we support uninstall for validator mode by calling onUninstall
     // but for permission mode, we do it naively by setting hook to address(0).
     // it is more recommended to use a nonce revoke to make sure the validator has been revoked
-    // also, we are not calling hook.onInstall here
-    function _uninstallValidation(ValidationId vId, bytes calldata validatorData) internal returns (IHook hook) {
+    function _clearValidationData(ValidationId vId) internal returns (IHook hook) {
         ValidationStorage storage state = _validationStorage();
         if (vId == state.rootValidator) {
             revert RootValidatorCannotBeRemoved();
         }
         hook = state.validationConfig[vId].hook;
         state.validationConfig[vId].hook = IHook(address(0));
-        ValidationType vType = ValidatorLib.getType(vId);
-        if (vType == VALIDATION_TYPE_VALIDATOR) {
-            IValidator validator = ValidatorLib.getValidator(vId);
-            ModuleLib.uninstallModule(address(validator), validatorData);
-            emit IERC7579Account.ModuleUninstalled(MODULE_TYPE_VALIDATOR, address(validator));
-        } else if (vType == VALIDATION_TYPE_PERMISSION) {
-            PermissionId permission = ValidatorLib.getPermissionId(vId);
-            _uninstallPermission(permission, validatorData);
-        } else {
-            revert InvalidValidationType();
-        }
     }
 
     function _uninstallPermission(PermissionId pId, bytes calldata data) internal {
@@ -297,10 +288,12 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         }
     }
 
-    function _doValidation(ValidationMode vMode, ValidationId vId, PackedUserOperation calldata op, bytes32 userOpHash)
-        internal
-        returns (ValidationData validationData)
-    {
+    function _validateUserOp(
+        ValidationMode vMode,
+        ValidationId vId,
+        PackedUserOperation calldata op,
+        bytes32 userOpHash
+    ) internal returns (ValidationData validationData) {
         ValidationStorage storage state = _validationStorage();
         PackedUserOperation memory userOp = op;
         bytes calldata userOpSig = op.signature;
@@ -347,6 +340,37 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
             } else {
                 revert InvalidValidationType();
             }
+        }
+    }
+
+    function _verifySignature(bytes32 hash, bytes calldata signature) internal view returns (bytes4) {
+        ValidationStorage storage vs = _validationStorage();
+        (ValidationId vId, bytes calldata sig) = ValidatorLib.decodeSignature(signature);
+        if (ValidatorLib.getType(vId) == VALIDATION_TYPE_ROOT) {
+            vId = vs.rootValidator;
+        }
+        bool isReplayable = sig.length >= 32 && bytes32(sig[0:32]) == MAGIC_VALUE_SIG_REPLAYABLE;
+        if (isReplayable) {
+            sig = sig[32:];
+        }
+        ValidationType vType = ValidatorLib.getType(vId);
+        if (address(vs.validationConfig[vId].hook) == HOOK_MODULE_NOT_INSTALLED && vType != VALIDATION_TYPE_7702) {
+            revert InvalidValidator();
+        }
+        if (vType == VALIDATION_TYPE_VALIDATOR) {
+            IValidator validator = ValidatorLib.getValidator(vId);
+            return validator.isValidSignatureWithSender(msg.sender, _toWrappedHash(hash, isReplayable), sig);
+        } else if (vType == VALIDATION_TYPE_PERMISSION) {
+            PermissionId pId = ValidatorLib.getPermissionId(vId);
+            PassFlag permissionFlag = vs.permissionConfig[pId].permissionFlag;
+            if (PassFlag.unwrap(permissionFlag) & PassFlag.unwrap(SKIP_SIGNATURE) != 0) {
+                revert PermissionNotAlllowedForSignature();
+            }
+            return _checkPermissionSignature(pId, msg.sender, hash, sig, isReplayable);
+        } else if (vType == VALIDATION_TYPE_7702) {
+            return _verify7702Signature(_toWrappedHash(hash, isReplayable), sig);
+        } else {
+            revert InvalidValidationType();
         }
     }
 
@@ -408,7 +432,7 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         validationData = _checkEnableSig(digest, enableData.enableSig);
         _installValidation(vId, config, enableData.validatorData, enableData.hookData);
         _configureSelector(enableData.selectorData);
-        _setSelector(vId, bytes4(enableData.selectorData[0:4]), true);
+        _grantAccess(vId, bytes4(enableData.selectorData[0:4]), true);
     }
 
     function _checkEnableSig(bytes32 digest, bytes calldata enableSig)

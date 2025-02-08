@@ -47,11 +47,9 @@ abstract contract ExecutorManager {
         emit IERC7579Account.ModuleInstalled(MODULE_TYPE_EXECUTOR, address(executor));
     }
 
-    function _uninstallExecutor(IExecutor executor, bytes calldata executorData) internal returns (IHook hook) {
+    function _clearExecutorData(IExecutor executor) internal returns (IHook hook) {
         ExecutorConfig storage config = _executorConfig(executor);
         hook = config.hook;
         config.hook = IHook(address(0));
-        ModuleLib.uninstallModule(address(executor), executorData);
-        emit IERC7579Account.ModuleUninstalled(MODULE_TYPE_EXECUTOR, address(executor));
     }
 }
