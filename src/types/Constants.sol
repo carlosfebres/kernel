@@ -42,6 +42,14 @@ ValidationType constant VALIDATION_TYPE_7702 = ValidationType.wrap(0x00);
 ValidationType constant VALIDATION_TYPE_VALIDATOR = ValidationType.wrap(0x01);
 ValidationType constant VALIDATION_TYPE_PERMISSION = ValidationType.wrap(0x02);
 
+// --- Kernel Hook constants ---
+address constant HOOK_MODULE_NOT_INSTALLED = address(0);
+address constant HOOK_MODULE_INSTALLED = address(1);
+address constant HOOK_ONLY_ENTRYPOINT = address(0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF);
+
+// --- EIP7702 constants ---
+bytes2 constant EIP7702_PREFIX = bytes2(0xef01);
+
 // --- storage slots ---
 // bytes32(uint256(keccak256('kernel.v3.selector')) - 1)
 bytes32 constant SELECTOR_MANAGER_STORAGE_SLOT = 0x7c341349a4360fdd5d5bc07e69f325dc6aaea3eb018b3e0ea7e53cc0bb0d6f3b;

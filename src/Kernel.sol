@@ -35,6 +35,9 @@ import {
     MODULE_TYPE_HOOK,
     MODULE_TYPE_POLICY,
     MODULE_TYPE_SIGNER,
+    HOOK_MODULE_NOT_INSTALLED,
+    HOOK_MODULE_INSTALLED,
+    HOOK_ONLY_ENTRYPOINT,
     EXECTYPE_TRY,
     EXECTYPE_DEFAULT,
     EXEC_MODE_DEFAULT,
@@ -44,7 +47,8 @@ import {
     CALLTYPE_STATIC,
     MAGIC_VALUE_SIG_REPLAYABLE,
     ERC1271_INVALID,
-    ERC1271_MAGICVALUE
+    ERC1271_MAGICVALUE,
+    EIP7702_PREFIX
 } from "./types/Constants.sol";
 
 import {InstallExecutorDataFormat, InstallFallbackDataFormat, InstallValidatorDataFormat} from "./types/Structs.sol";
@@ -59,6 +63,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
     error InvalidCaller();
     error InvalidSelector();
     error InitConfigError(uint256 idx);
+    error AlreadyInitialized();
 
     event Received(address sender, uint256 amount);
     event Upgraded(address indexed implementation);
@@ -106,8 +111,8 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
     ) external {
         ValidationStorage storage vs = _validationStorage();
         require(
-            ValidationId.unwrap(vs.rootValidator) == bytes21(0) && bytes2(address(this).code) != 0xef01,
-            "already initialized"
+            ValidationId.unwrap(vs.rootValidator) == bytes21(0) && bytes2(address(this).code) != EIP7702_PREFIX,
+            AlreadyInitialized()
         );
         if (ValidationId.unwrap(_rootValidator) == bytes21(0)) {
             revert InvalidValidator();
@@ -143,7 +148,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
             revert InvalidValidationType();
         }
         _setRootValidator(_rootValidator);
-        if (_validationStorage().validationConfig[_rootValidator].hook == IHook(address(0))) {
+        if (_validationStorage().validationConfig[_rootValidator].hook == IHook(HOOK_MODULE_NOT_INSTALLED)) {
             // when new rootValidator is not installed yet
             ValidationConfig memory config = ValidationConfig({nonce: uint32(vs.currentNonce), hook: hook});
             _installValidation(_rootValidator, config, validatorData, hookData);
@@ -186,14 +191,14 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         SelectorConfig memory config = _selectorConfig(msg.sig);
         bool success;
         bytes memory result;
-        if (address(config.hook) == address(0)) {
+        if (address(config.hook) == HOOK_MODULE_NOT_INSTALLED) {
             revert InvalidSelector();
         }
         // action installed
         bytes memory context;
-        if (address(config.hook) != address(1) && address(config.hook) != 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF) {
+        if (address(config.hook) != HOOK_MODULE_INSTALLED && address(config.hook) != HOOK_ONLY_ENTRYPOINT) {
             context = _doPreHook(config.hook, msg.value, msg.data);
-        } else if (address(config.hook) == 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF) {
+        } else if (address(config.hook) == HOOK_ONLY_ENTRYPOINT) {
             // for selector manager, address(0) for the hook will default to type(address).max,
             // and this will only allow entrypoints to interact
             if (msg.sender != address(entrypoint)) {
@@ -213,7 +218,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
                 revert(add(result, 0x20), mload(result))
             }
         }
-        if (address(config.hook) != address(1) && address(config.hook) != 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF) {
+        if (address(config.hook) != address(1) && address(config.hook) != HOOK_ONLY_ENTRYPOINT) {
             _doPostHook(config.hook, context);
         }
         assembly {
@@ -247,12 +252,12 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
             revert InvalidNonce();
         }
         IHook execHook = vc.hook;
-        if (address(execHook) == address(0) && vType != VALIDATION_TYPE_ROOT) {
+        if (address(execHook) == HOOK_MODULE_NOT_INSTALLED && vType != VALIDATION_TYPE_ROOT) {
             revert InvalidValidator();
         }
         executionHook[userOpHash] = execHook;
 
-        if (address(execHook) == address(1) || address(execHook) == address(0)) {
+        if (address(execHook) == HOOK_MODULE_INSTALLED || address(execHook) == HOOK_MODULE_NOT_INSTALLED) {
             // does not require hook
             if (vType != VALIDATION_TYPE_ROOT && !vs.allowedSelectors[vId][bytes4(userOp.callData[0:4])]) {
                 revert InvalidValidator();
@@ -304,15 +309,15 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
     {
         // no modifier needed, checking if msg.sender is registered executor will replace the modifier
         IHook hook = _executorConfig(IExecutor(msg.sender)).hook;
-        if (address(hook) == address(0)) {
+        if (address(hook) == HOOK_MODULE_NOT_INSTALLED) {
             revert InvalidExecutor();
         }
         bytes memory context;
-        if (address(hook) != address(1)) {
+        if (address(hook) != HOOK_MODULE_INSTALLED) {
             context = _doPreHook(hook, msg.value, msg.data);
         }
         returnData = ExecLib.execute(execMode, executionCalldata);
-        if (address(hook) != address(1)) {
+        if (address(hook) != HOOK_MODULE_INSTALLED) {
             _doPostHook(hook, context);
         }
     }
@@ -332,7 +337,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
             sig = sig[32:];
         }
         ValidationType vType = ValidatorLib.getType(vId);
-        if (address(vs.validationConfig[vId].hook) == address(0) && vType != VALIDATION_TYPE_7702) {
+        if (address(vs.validationConfig[vId].hook) == HOOK_MODULE_NOT_INSTALLED && vType != VALIDATION_TYPE_7702) {
             revert InvalidValidator();
         }
         if (vType == VALIDATION_TYPE_VALIDATOR) {
