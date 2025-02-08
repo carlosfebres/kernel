@@ -343,37 +343,6 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         }
     }
 
-    function _verifySignature(bytes32 hash, bytes calldata signature) internal view returns (bytes4) {
-        ValidationStorage storage vs = _validationStorage();
-        (ValidationId vId, bytes calldata sig) = ValidatorLib.decodeSignature(signature);
-        if (ValidatorLib.getType(vId) == VALIDATION_TYPE_ROOT) {
-            vId = vs.rootValidator;
-        }
-        bool isReplayable = sig.length >= 32 && bytes32(sig[0:32]) == MAGIC_VALUE_SIG_REPLAYABLE;
-        if (isReplayable) {
-            sig = sig[32:];
-        }
-        ValidationType vType = ValidatorLib.getType(vId);
-        if (address(vs.validationConfig[vId].hook) == HOOK_MODULE_NOT_INSTALLED && vType != VALIDATION_TYPE_7702) {
-            revert InvalidValidator();
-        }
-        if (vType == VALIDATION_TYPE_VALIDATOR) {
-            IValidator validator = ValidatorLib.getValidator(vId);
-            return validator.isValidSignatureWithSender(msg.sender, _toWrappedHash(hash, isReplayable), sig);
-        } else if (vType == VALIDATION_TYPE_PERMISSION) {
-            PermissionId pId = ValidatorLib.getPermissionId(vId);
-            PassFlag permissionFlag = vs.permissionConfig[pId].permissionFlag;
-            if (PassFlag.unwrap(permissionFlag) & PassFlag.unwrap(SKIP_SIGNATURE) != 0) {
-                revert PermissionNotAlllowedForSignature();
-            }
-            return _checkPermissionSignature(pId, msg.sender, hash, sig, isReplayable);
-        } else if (vType == VALIDATION_TYPE_7702) {
-            return _verify7702Signature(_toWrappedHash(hash, isReplayable), sig);
-        } else {
-            revert InvalidValidationType();
-        }
-    }
-
     function replayableUserOpHash(PackedUserOperation calldata userOp, address entryPoint)
         public
         pure
@@ -429,13 +398,13 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         bool isReplayable
     ) internal returns (ValidationData validationData) {
         (ValidationConfig memory config, bytes32 digest) = _enableDigest(vId, hook, enableData, isReplayable);
-        validationData = _checkEnableSig(digest, enableData.enableSig);
+        validationData = _verifyEnableSig(digest, enableData.enableSig);
         _installValidation(vId, config, enableData.validatorData, enableData.hookData);
         _configureSelector(enableData.selectorData);
         _grantAccess(vId, bytes4(enableData.selectorData[0:4]), true);
     }
 
-    function _checkEnableSig(bytes32 digest, bytes calldata enableSig)
+    function _verifyEnableSig(bytes32 digest, bytes calldata enableSig)
         internal
         view
         returns (ValidationData validationData)
@@ -461,42 +430,57 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         }
     }
 
-    function _configureSelector(bytes calldata selectorData) internal {
-        bytes4 selector = bytes4(selectorData[0:4]);
-
-        if (selectorData.length >= 4) {
-            if (selectorData.length >= 44) {
-                SelectorDataFormat calldata data;
-                assembly {
-                    data := add(selectorData.offset, 44)
-                }
-                // install selector with hook and target contract
-                IModule selectorModule = IModule(address(bytes20(selectorData[4:24])));
-                if (
-                    CallType.wrap(bytes1(data.selectorInitData[0])) == CALLTYPE_SINGLE && selectorModule.isModuleType(2)
-                ) {
-                    // also adds as executor when fallback module is also a executor
-                    SelectorDataFormatWithExecutorData calldata dataWithExecutor;
-                    assembly {
-                        dataWithExecutor := data
-                    }
-                    IHook executorHook = IHook(address(bytes20(dataWithExecutor.executorHookData[0:20])));
-                    // if module is also executor, install as executor
-                    _installExecutorWithoutInit(IExecutor(address(selectorModule)), executorHook);
-                    _installHook(executorHook, dataWithExecutor.executorHookData[20:]);
-                }
-                _installSelector(
-                    selector,
-                    address(selectorModule),
-                    IHook(address(bytes20(selectorData[24:44]))),
-                    data.selectorInitData
-                );
-                _installHook(IHook(address(bytes20(selectorData[24:44]))), data.hookInitData);
-            } else {
-                // set without install
-                require(selectorData.length == 4, "Invalid selectorData");
-            }
+    function _verifySignature(bytes32 hash, bytes calldata signature) internal view returns (bytes4) {
+        ValidationStorage storage vs = _validationStorage();
+        (ValidationId vId, bytes calldata sig) = ValidatorLib.decodeSignature(signature);
+        if (ValidatorLib.getType(vId) == VALIDATION_TYPE_ROOT) {
+            vId = vs.rootValidator;
         }
+        bool isReplayable = sig.length >= 32 && bytes32(sig[0:32]) == MAGIC_VALUE_SIG_REPLAYABLE;
+        if (isReplayable) {
+            sig = sig[32:];
+        }
+        ValidationType vType = ValidatorLib.getType(vId);
+        ValidationConfig memory vc = vs.validationConfig[vId];
+        if (address(vc.hook) == HOOK_MODULE_NOT_INSTALLED && vType != VALIDATION_TYPE_7702) {
+            revert InvalidValidator();
+        }
+        if (vType != VALIDATION_TYPE_ROOT && vc.nonce < vs.validNonceFrom) {
+            revert InvalidNonce();
+        }
+        if (vType == VALIDATION_TYPE_VALIDATOR) {
+            IValidator validator = ValidatorLib.getValidator(vId);
+            return validator.isValidSignatureWithSender(msg.sender, _toWrappedHash(hash, isReplayable), sig);
+        } else if (vType == VALIDATION_TYPE_PERMISSION) {
+            PermissionId pId = ValidatorLib.getPermissionId(vId);
+            PassFlag permissionFlag = vs.permissionConfig[pId].permissionFlag;
+            if (PassFlag.unwrap(permissionFlag) & PassFlag.unwrap(SKIP_SIGNATURE) != 0) {
+                revert PermissionNotAlllowedForSignature();
+            }
+            return _checkPermissionSignature(pId, msg.sender, hash, sig, isReplayable);
+        } else if (vType == VALIDATION_TYPE_7702) {
+            return _verify7702Signature(_toWrappedHash(hash, isReplayable), sig);
+        } else {
+            revert InvalidValidationType();
+        }
+    }
+
+    function _checkPermissionSignature(
+        PermissionId pId,
+        address caller,
+        bytes32 hash,
+        bytes calldata sig,
+        bool isReplayable
+    ) internal view returns (bytes4) {
+        (ISigner signer, ValidationData valdiationData, bytes calldata validatorSig) =
+            _checkSignaturePolicy(pId, msg.sender, hash, sig);
+        (ValidAfter validAfter, ValidUntil validUntil,) = parseValidationData(ValidationData.unwrap(valdiationData));
+        if (block.timestamp < ValidAfter.unwrap(validAfter) || block.timestamp > ValidUntil.unwrap(validUntil)) {
+            return ERC1271_INVALID;
+        }
+        return signer.checkSignature(
+            bytes32(PermissionId.unwrap(pId)), msg.sender, _toWrappedHash(hash, isReplayable), validatorSig
+        );
     }
 
     function _enableDigest(
@@ -523,6 +507,37 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         );
 
         digest = isReplayable ? _chainAgnosticHashTypedData(structHash) : _hashTypedData(structHash);
+    }
+
+    function _configureSelector(bytes calldata selectorData) internal {
+        bytes4 selector = bytes4(selectorData[0:4]);
+
+        if (selectorData.length >= 44) {
+            SelectorDataFormat calldata data;
+            assembly {
+                data := add(selectorData.offset, 44)
+            }
+            // install selector with hook and target contract
+            IModule selectorModule = IModule(address(bytes20(selectorData[4:24])));
+            if (CallType.wrap(bytes1(data.selectorInitData[0])) == CALLTYPE_SINGLE && selectorModule.isModuleType(2)) {
+                // also adds as executor when fallback module is also a executor
+                SelectorDataFormatWithExecutorData calldata dataWithExecutor;
+                assembly {
+                    dataWithExecutor := data
+                }
+                IHook executorHook = IHook(address(bytes20(dataWithExecutor.executorHookData[0:20])));
+                // if module is also executor, install as executor
+                _installExecutorWithoutInit(IExecutor(address(selectorModule)), executorHook);
+                _installHook(executorHook, dataWithExecutor.executorHookData[20:]);
+            }
+            _installSelector(
+                selector, address(selectorModule), IHook(address(bytes20(selectorData[24:44]))), data.selectorInitData
+            );
+            _installHook(IHook(address(bytes20(selectorData[24:44]))), data.hookInitData);
+        } else {
+            // set without install
+            require(selectorData.length == 4, "Invalid selectorData");
+        }
     }
 
     function _verify7702Signature(bytes32 hash, bytes calldata sig) internal view returns (bytes4) {
@@ -623,24 +638,6 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
                 }
             }
         }
-    }
-
-    function _checkPermissionSignature(
-        PermissionId pId,
-        address caller,
-        bytes32 hash,
-        bytes calldata sig,
-        bool isReplayable
-    ) internal view returns (bytes4) {
-        (ISigner signer, ValidationData valdiationData, bytes calldata validatorSig) =
-            _checkSignaturePolicy(pId, caller, hash, sig);
-        (ValidAfter validAfter, ValidUntil validUntil,) = parseValidationData(ValidationData.unwrap(valdiationData));
-        if (block.timestamp < ValidAfter.unwrap(validAfter) || block.timestamp > ValidUntil.unwrap(validUntil)) {
-            return ERC1271_INVALID;
-        }
-        return signer.checkSignature(
-            bytes32(PermissionId.unwrap(pId)), caller, _toWrappedHash(hash, isReplayable), validatorSig
-        );
     }
 
     function _toWrappedHash(bytes32 hash, bool isReplayable) internal view returns (bytes32) {
