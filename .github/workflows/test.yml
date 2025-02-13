@@ -39,10 +39,10 @@ jobs:
 
       - name: Run Tests with ${{ matrix.profile }}
         run: >
-          ( [ "${{ matrix.profile }}" = "post-cancun" ] &&
+          ( [ "${{ matrix.profile }}" = "post-prague" ] &&
             forge test --use 0.8.28 --evm-version "prague"
           ) ||
-          ( [ "${{ matrix.profile }}" = "post-cancun-via-ir" ] &&
+          ( [ "${{ matrix.profile }}" = "post-prague-via-ir" ] &&
             forge test --use 0.8.28 --evm-version "prague" --via-ir
           ) ||
           ( [ "${{ matrix.profile }}" = "via-ir" ] &&
