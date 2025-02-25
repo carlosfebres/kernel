@@ -426,7 +426,7 @@ contract Kernel7702TestBase is TestPlus, Test {
         virtual
         returns (bytes memory)
     {
-        return _rootSignDigest(userOpHash, success);
+        return _rootSignDigest(ECDSA.toEthSignedMessageHash(userOpHash), success);
     }
 
     function _validatorSignUserOp(PackedUserOperation memory, bytes32 userOpHash, bool success)

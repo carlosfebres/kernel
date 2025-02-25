@@ -69,6 +69,7 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
     error InvalidMode();
     error InvalidValidator();
     error InvalidSignature();
+    error InvalidSelectorData();
     error EnableNotApproved();
     error PolicySignatureOrderError();
     error SignerPrefixNotPresent();
@@ -334,7 +335,7 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
                     )
                 );
             } else if (vType == VALIDATION_TYPE_7702) {
-                validationData = _verify7702Signature(userOpHash, userOpSig) == ERC1271_MAGICVALUE
+                validationData = _verify7702Signature(ECDSA.toEthSignedMessageHash(userOpHash), userOpSig) == ERC1271_MAGICVALUE
                     ? ValidationData.wrap(0)
                     : ValidationData.wrap(1);
             } else {
@@ -491,8 +492,10 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
     ) internal view returns (ValidationConfig memory config, bytes32 digest) {
         ValidationStorage storage state = _validationStorage();
         config.hook = IHook(hook);
-        config.nonce =
-            state.validationConfig[vId].nonce == state.currentNonce ? state.currentNonce + 1 : state.currentNonce;
+        unchecked {
+            config.nonce =
+                state.validationConfig[vId].nonce == state.currentNonce ? state.currentNonce + 1 : state.currentNonce;
+        }
 
         bytes32 structHash = keccak256(
             abi.encode(
@@ -536,7 +539,9 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
             _installHook(IHook(address(bytes20(selectorData[24:44]))), data.hookInitData);
         } else {
             // set without install
-            require(selectorData.length == 4, "Invalid selectorData");
+            if (selectorData.length != 4) {
+                revert InvalidSelectorData();
+            }
         }
     }
 

@@ -110,10 +110,10 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         bytes[] calldata initConfig
     ) external {
         ValidationStorage storage vs = _validationStorage();
-        require(
-            ValidationId.unwrap(vs.rootValidator) == bytes21(0) && bytes2(address(this).code) != EIP7702_PREFIX,
-            AlreadyInitialized()
-        );
+        if(
+            ValidationId.unwrap(vs.rootValidator) != bytes21(0) || bytes2(address(this).code) == EIP7702_PREFIX) {
+            revert AlreadyInitialized();
+        }
         if (ValidationId.unwrap(_rootValidator) == bytes21(0)) {
             revert InvalidValidator();
         }
@@ -140,7 +140,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         bytes calldata hookData
     ) external payable onlyEntryPointOrSelfOrRoot {
         ValidationStorage storage vs = _validationStorage();
-        if (ValidationId.unwrap(_rootValidator) == bytes21(0) || bytes2(address(this).code) == EIP7702_PREFIX) {
+        if (ValidationId.unwrap(_rootValidator) == bytes21(0)) {
             revert InvalidValidator();
         }
         ValidationType vType = ValidatorLib.getType(_rootValidator);
@@ -444,7 +444,9 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
             if (target == address(0)) {
                 return;
             }
-            require(target == module, InvalidSelector());
+            if (target != module) {
+                revert InvalidSelector();
+            }
             deInitData = deInitData[4:];
         } else if (moduleType == MODULE_TYPE_HOOK) {
             ValidationId vId = _validationStorage().rootValidator;
