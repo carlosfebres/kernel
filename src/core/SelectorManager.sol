@@ -11,7 +11,6 @@ import {
     CALLTYPE_SINGLE,
     MODULE_TYPE_FALLBACK
 } from "../types/Constants.sol";
-import {ModuleLib} from "../utils/ModuleLib.sol";
 
 abstract contract SelectorManager {
     error NotSupportedCallType();

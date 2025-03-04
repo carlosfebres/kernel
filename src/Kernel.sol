@@ -110,8 +110,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         bytes[] calldata initConfig
     ) external {
         ValidationStorage storage vs = _validationStorage();
-        if(
-            ValidationId.unwrap(vs.rootValidator) != bytes21(0) || bytes2(address(this).code) == EIP7702_PREFIX) {
+        if (ValidationId.unwrap(vs.rootValidator) != bytes21(0) || bytes3(address(this).code) == EIP7702_PREFIX) {
             revert AlreadyInitialized();
         }
         if (ValidationId.unwrap(_rootValidator) == bytes21(0)) {
@@ -164,7 +163,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
 
     function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
         name = "Kernel";
-        version = "0.3.2";
+        version = "0.3.3";
     }
 
     receive() external payable {
@@ -293,7 +292,8 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
     {
         bytes memory context;
         IHook hook = executionHook[userOpHash];
-        if (address(hook) != HOOK_MODULE_INSTALLED) {
+        bool callHook = address(hook) != HOOK_MODULE_INSTALLED;
+        if (callHook) {
             // removed 4bytes selector
             context = _doPreHook(hook, msg.value, userOp.callData[4:]);
         }
@@ -301,7 +301,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
         if (!success) {
             revert ExecutionReverted();
         }
-        if (address(hook) != HOOK_MODULE_INSTALLED) {
+        if (callHook) {
             _doPostHook(hook, context);
         }
     }
@@ -481,11 +481,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
     }
 
     function supportsModule(uint256 moduleTypeId) external pure override returns (bool) {
-        if (moduleTypeId < 7) {
-            return true;
-        } else {
-            return false;
-        }
+        return moduleTypeId < 7;
     }
 
     function isModuleInstalled(uint256 moduleType, address module, bytes calldata additionalContext)
@@ -507,7 +503,7 @@ contract Kernel is IAccount, IAccountExecute, IERC7579Account, ValidationManager
     }
 
     function accountId() external pure override returns (string memory accountImplementationId) {
-        return "kernel.advanced.v0.3.2";
+        return "kernel.advanced.v0.3.3";
     }
 
     function supportsExecutionMode(ExecMode mode) external pure override returns (bool) {

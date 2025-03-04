@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 
 import {IHook, IExecutor, IModule} from "../interfaces/IERC7579Modules.sol";
 import {IERC7579Account} from "../interfaces/IERC7579Account.sol";
-import {ModuleLib} from "../utils/ModuleLib.sol";
 import {EXECUTOR_MANAGER_STORAGE_SLOT, MODULE_TYPE_EXECUTOR} from "../types/Constants.sol";
 
 abstract contract ExecutorManager {
@@ -32,7 +31,7 @@ abstract contract ExecutorManager {
     function _installExecutor(IExecutor executor, bytes calldata executorData, IHook hook) internal {
         _installExecutorWithoutInit(executor, hook);
         if (executorData.length == 0) {
-            (bool success,) = address(executor).call(abi.encodeWithSelector(IModule.onInstall.selector, hex"")); // ignore return value
+            (bool success,) = address(executor).call(abi.encodeWithSelector(IModule.onInstall.selector, executorData)); // ignore return value
         } else {
             executor.onInstall(executorData);
         }

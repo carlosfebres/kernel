@@ -335,9 +335,8 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
                     )
                 );
             } else if (vType == VALIDATION_TYPE_7702) {
-                validationData = _verify7702Signature(ECDSA.toEthSignedMessageHash(userOpHash), userOpSig) == ERC1271_MAGICVALUE
-                    ? ValidationData.wrap(0)
-                    : ValidationData.wrap(1);
+                validationData = _verify7702Signature(ECDSA.toEthSignedMessageHash(userOpHash), userOpSig)
+                    == ERC1271_MAGICVALUE ? ValidationData.wrap(0) : ValidationData.wrap(1);
             } else {
                 revert InvalidValidationType();
             }
@@ -349,27 +348,18 @@ abstract contract ValidationManager is EIP712, SelectorManager, HookManager, Exe
         pure
         returns (bytes32)
     {
-        address sender = getSender(userOp);
-        uint256 nonce = userOp.nonce;
-        bytes32 hashInitCode = calldataKeccak(userOp.initCode);
-        bytes32 hashCallData = calldataKeccak(userOp.callData);
-        bytes32 accountGasLimits = userOp.accountGasLimits;
-        uint256 preVerificationGas = userOp.preVerificationGas;
-        bytes32 gasFees = userOp.gasFees;
-        bytes32 hashPaymasterAndData = calldataKeccak(userOp.paymasterAndData);
-
         return keccak256(
             abi.encode(
                 keccak256(
                     abi.encode(
-                        sender,
-                        nonce,
-                        hashInitCode,
-                        hashCallData,
-                        accountGasLimits,
-                        preVerificationGas,
-                        gasFees,
-                        hashPaymasterAndData
+                        getSender(userOp),
+                        userOp.nonce,
+                        calldataKeccak(userOp.initCode),
+                        calldataKeccak(userOp.callData),
+                        userOp.accountGasLimits,
+                        userOp.preVerificationGas,
+                        userOp.gasFees,
+                        calldataKeccak(userOp.paymasterAndData)
                     )
                 ),
                 entryPoint,

@@ -48,7 +48,7 @@ address constant HOOK_MODULE_INSTALLED = address(1);
 address constant HOOK_ONLY_ENTRYPOINT = address(0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF);
 
 // --- EIP7702 constants ---
-bytes2 constant EIP7702_PREFIX = bytes2(0xef01);
+bytes3 constant EIP7702_PREFIX = bytes3(0xef0100);
 
 // --- storage slots ---
 // bytes32(uint256(keccak256('kernel.v3.selector')) - 1)
