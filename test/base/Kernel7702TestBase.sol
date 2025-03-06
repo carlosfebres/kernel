@@ -184,10 +184,10 @@ contract Kernel7702TestBase is TestPlus, Test {
 
         bytes32 digest;
         if (isReplayable) {
-            digest = chainAgnosticHashTypedData(address(kernel), "Kernel", "0.3.2", hash);
+            digest = chainAgnosticHashTypedData(address(kernel), "Kernel", "0.3.3", hash);
         } else {
             digest =
-                keccak256(abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), hash));
+                keccak256(abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), hash));
         }
 
         return digest;
@@ -1038,7 +1038,7 @@ contract Kernel7702TestBase is TestPlus, Test {
     function testSignatureRoot(bytes32 hash) external whenInitialized {
         bytes32 wrappedHash = keccak256(abi.encode(keccak256("Kernel(bytes32 hash)"), hash));
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), wrappedHash)
+            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), wrappedHash)
         );
         bytes memory sig = _rootSignDigest(digest, true);
         sig = abi.encodePacked(hex"00", sig);
@@ -1067,7 +1067,7 @@ contract Kernel7702TestBase is TestPlus, Test {
 
         bytes32 wrappedHash = keccak256(abi.encode(keccak256("Kernel(bytes32 hash)"), hash));
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), wrappedHash)
+            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), wrappedHash)
         );
         bytes memory sig = _validatorSignDigest(digest, true);
         sig = abi.encodePacked(hex"01", address(enabledValidator), sig);
@@ -1095,7 +1095,7 @@ contract Kernel7702TestBase is TestPlus, Test {
         );
         bytes32 wrappedHash = keccak256(abi.encode(keccak256("Kernel(bytes32 hash)"), hash));
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), wrappedHash)
+            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), wrappedHash)
         );
         bytes memory sig = _permissionSignDigest(digest, true);
         sig = abi.encodePacked(hex"02", PermissionId.unwrap(enabledPermission), hex"ff", sig);
