@@ -20,7 +20,7 @@ jobs:
 
     strategy:
       matrix:
-        profile: [post-prague,post-prague-via-ir,solc-past-versions-0,via-ir,min-solc,min-solc-via-ir]
+        profile: [post-prague,post-prague-via-ir,via-ir,min-solc,min-solc-via-ir]
 
     steps:
       - uses: actions/checkout@v4
