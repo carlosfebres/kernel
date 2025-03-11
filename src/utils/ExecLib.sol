@@ -69,20 +69,24 @@ library ExecLib {
     function execute(bytes32[] calldata pointers) internal returns (bytes[] memory result) {
         uint256 length = pointers.length;
         result = new bytes[](length);
-        for (uint256 i; i < length; i++) {
-            (address target, uint256 value, bytes calldata data) = LibERC7579.getExecution(pointers, i);
-            result[i] = execute(target, value, data);
+        unchecked {
+            for (uint256 i; i < length; i++) {
+                (address target, uint256 value, bytes calldata data) = LibERC7579.getExecution(pointers, i);
+                result[i] = execute(target, value, data);
+            }
         }
     }
 
     function tryExecute(bytes32[] calldata pointers) internal returns (bytes[] memory result) {
         uint256 length = pointers.length;
         result = new bytes[](length);
-        for (uint256 i; i < length; i++) {
-            (address target, uint256 value, bytes calldata data) = LibERC7579.getExecution(pointers, i);
-            bool success;
-            (success, result[i]) = tryExecute(target, value, data);
-            if (!success) emit TryExecuteUnsuccessful(i, result[i]);
+        unchecked {
+            for (uint256 i; i < length; i++) {
+                (address target, uint256 value, bytes calldata data) = LibERC7579.getExecution(pointers, i);
+                bool success;
+                (success, result[i]) = tryExecute(target, value, data);
+                if (!success) emit TryExecuteUnsuccessful(i, result[i]);
+            }
         }
     }
 

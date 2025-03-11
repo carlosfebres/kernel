@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "../Kernel.sol";
-import "../factory/KernelFactory.sol";
-import "../factory/FactoryStaker.sol";
+import "src/Kernel.sol";
+import "src/factory/KernelFactory.sol";
+import "src/factory/FactoryStaker.sol";
 import "solady_test/utils/TestPlus.sol";
 import "forge-std/Test.sol";
+import "../mock/MockCallee.sol";
 import "../mock/MockValidator.sol";
 import "../mock/MockPolicy.sol";
 import "../mock/MockSigner.sol";
@@ -16,32 +17,11 @@ import "../mock/MockFallback.sol";
 import "../mock/MockERC20.sol";
 import "../mock/MockERC721.sol";
 import "../mock/MockERC1155.sol";
-import "../core/ValidationManager.sol";
-import "./TestBase/erc4337Util.sol";
-import "../types/Types.sol";
-import "../types/Structs.sol";
+import "src/core/ValidationManager.sol";
+import "./erc4337Util.sol";
+import "src/types/Types.sol";
+import "src/types/Structs.sol";
 import "solady/accounts/LibERC7579.sol";
-
-contract MockCallee {
-    uint256 public value;
-
-    event MockEvent(address indexed caller, address indexed here);
-
-    function setValue(uint256 _value) public {
-        value = _value;
-    }
-
-    function addValue(uint256 _value) public {
-        value += _value;
-    }
-
-    function emitEvent(bool shouldFail) public {
-        if (shouldFail) {
-            revert("Hello");
-        }
-        emit MockEvent(msg.sender, address(this));
-    }
-}
 
 abstract contract KernelTestBase is TestPlus, Test {
     address stakerOwner;
@@ -211,10 +191,10 @@ abstract contract KernelTestBase is TestPlus, Test {
 
         bytes32 digest;
         if (isReplayable) {
-            digest = chainAgnosticHashTypedData(address(kernel), "Kernel", "0.3.2", hash);
+            digest = chainAgnosticHashTypedData(address(kernel), "Kernel", "0.3.3", hash);
         } else {
             digest =
-                keccak256(abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), hash));
+                keccak256(abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), hash));
         }
 
         return digest;
@@ -1099,7 +1079,7 @@ abstract contract KernelTestBase is TestPlus, Test {
     function testSignatureRoot(bytes32 hash) external whenInitialized {
         bytes32 wrappedHash = keccak256(abi.encode(keccak256("Kernel(bytes32 hash)"), hash));
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), wrappedHash)
+            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), wrappedHash)
         );
         bytes memory sig = _rootSignDigest(digest, true);
         sig = abi.encodePacked(hex"00", sig);
@@ -1128,7 +1108,7 @@ abstract contract KernelTestBase is TestPlus, Test {
 
         bytes32 wrappedHash = keccak256(abi.encode(keccak256("Kernel(bytes32 hash)"), hash));
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), wrappedHash)
+            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), wrappedHash)
         );
         bytes memory sig = _validatorSignDigest(digest, true);
         sig = abi.encodePacked(hex"01", address(enabledValidator), sig);
@@ -1156,7 +1136,7 @@ abstract contract KernelTestBase is TestPlus, Test {
         );
         bytes32 wrappedHash = keccak256(abi.encode(keccak256("Kernel(bytes32 hash)"), hash));
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.2", address(kernel)), wrappedHash)
+            abi.encodePacked("\x19\x01", _buildDomainSeparator("Kernel", "0.3.3", address(kernel)), wrappedHash)
         );
         bytes memory sig = _permissionSignDigest(digest, true);
         sig = abi.encodePacked(hex"02", PermissionId.unwrap(enabledPermission), hex"ff", sig);

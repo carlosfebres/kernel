@@ -15,10 +15,12 @@ jobs:
   tests:
     name: Forge Testing
     runs-on: ubuntu-latest
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: true
 
     strategy:
       matrix:
-        profile: [post-cancun,post-cancun-via-ir,solc-past-versions-0,via-ir,min-solc,min-solc-via-ir]
+        profile: [post-prague,post-prague-via-ir,via-ir,min-solc,min-solc-via-ir]
 
     steps:
       - uses: actions/checkout@v4
@@ -39,25 +41,21 @@ jobs:
 
       - name: Run Tests with ${{ matrix.profile }}
         run: >
-          ( [ "${{ matrix.profile }}" = "post-cancun" ] &&
-            forge test --use 0.8.25 --evm-version "cancun"
+          ( [ "${{ matrix.profile }}" = "post-prague" ] &&
+            forge test --use 0.8.28 --evm-version "prague"
           ) ||
-          ( [ "${{ matrix.profile }}" = "post-cancun-via-ir" ] &&
-            forge test --use 0.8.25 --evm-version "cancun" --via-ir
-          ) ||
-          ( [ "${{ matrix.profile }}" = "solc-past-versions-0" ] &&
-            forge test --use 0.8.23 --fuzz-runs 16 &&
-            forge test --use 0.8.24 --fuzz-runs 16
+          ( [ "${{ matrix.profile }}" = "post-prague-via-ir" ] &&
+            forge test --use 0.8.28 --evm-version "prague" --via-ir
           ) ||
           ( [ "${{ matrix.profile }}" = "via-ir" ] &&
             forge test --via-ir
           ) ||
           ( [ "${{ matrix.profile }}" = "min-solc" ] &&
             forge fmt --check &&
-            forge test --use 0.8.23
+            forge test --use 0.8.28
           ) ||
           ( [ "${{ matrix.profile }}" = "min-solc-via-ir" ] &&
-            forge test --use 0.8.23 --via-ir
+            forge test --use 0.8.28 --via-ir
           ) 
 
   codespell:

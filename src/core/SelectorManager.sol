@@ -11,7 +11,6 @@ import {
     CALLTYPE_SINGLE,
     MODULE_TYPE_FALLBACK
 } from "../types/Constants.sol";
-import {ModuleLib} from "../utils/ModuleLib.sol";
 
 abstract contract SelectorManager {
     error NotSupportedCallType();
@@ -60,13 +59,12 @@ abstract contract SelectorManager {
         ss.callType = callType;
     }
 
-    function _uninstallSelector(bytes4 selector, bytes calldata selectorDeinitData) internal returns (IHook hook) {
+    function _clearSelectorData(bytes4 selector) internal returns (IHook hook, address target) {
         SelectorConfig storage ss = _selectorConfig(selector);
         hook = ss.hook;
         ss.hook = IHook(address(0));
         if (ss.callType == CALLTYPE_SINGLE) {
-            ModuleLib.uninstallModule(ss.target, selectorDeinitData);
-            emit IERC7579Account.ModuleUninstalled(MODULE_TYPE_FALLBACK, ss.target);
+            target = ss.target; // if callType!=CALLTYPE_SINGLE, don't need to call uninstall
         }
         ss.target = address(0);
         ss.callType = CallType.wrap(bytes1(0x00));

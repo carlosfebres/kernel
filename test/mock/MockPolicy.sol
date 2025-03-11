@@ -2,8 +2,8 @@
 
 pragma solidity ^0.8.0;
 
-import {IPolicy} from "../interfaces/IERC7579Modules.sol";
-import {PackedUserOperation} from "../interfaces/PackedUserOperation.sol";
+import {IPolicy} from "src/interfaces/IERC7579Modules.sol";
+import {PackedUserOperation} from "src/interfaces/PackedUserOperation.sol";
 import "forge-std/console.sol";
 
 contract MockPolicy is IPolicy {
