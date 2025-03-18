@@ -6,11 +6,13 @@ import {LibClone} from "solady/utils/LibClone.sol";
 
 contract KernelFactory {
     error InitializeError();
+    error ImplementationNotDeployed();
 
     address public immutable implementation;
 
     constructor(address _impl) {
         implementation = _impl;
+        require(_impl.code.length > 0, ImplementationNotDeployed());
     }
 
     function createAccount(bytes calldata data, bytes32 salt) public payable returns (address) {
