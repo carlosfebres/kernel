@@ -13,8 +13,8 @@ Kernel is also a winner of [the inaugural Ethereum AA grant](https://erc4337.mir
 Kernel is supported by all major AA SDKs, including:
 
 - [ZeroDev](https://docs.zerodev.app/)
+- [Viem](https://viem.sh/account-abstraction/accounts/smart/toEcdsaKernelSmartAccount)
 - [Permissionless.js](https://docs.pimlico.io/permissionless/how-to/accounts/use-kernel-account)
-- [UserOp.js](https://docs.stackup.sh/docs/useropjs-presets#kernel)
 
 ## Plugins
 
