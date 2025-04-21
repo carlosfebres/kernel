@@ -33,7 +33,7 @@ forge test
 
 ### Deployment
 
-We have built a [portal](https://orchestra-web-vhx6.onrender.com) for deploying Kernel on any network.
+We have built a [portal](https://kernel.zerodev.app/) for deploying Kernel on any network.
 
 If you don't see a network, feel free to open an issue or use manual connection.
 
