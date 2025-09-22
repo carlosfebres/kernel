@@ -12,6 +12,7 @@ import {MODULE_TYPE_EXECUTOR, CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAU
 import {ExecModePayload} from "../src/types/Types.sol";
 import {Execution} from "../src/types/Structs.sol";
 import {ECDSA} from "solady/utils/ECDSA.sol";
+import {EIP712} from "solady/utils/EIP712.sol";
 import {PackedUserOperation} from "../src/interfaces/PackedUserOperation.sol";
 
 contract MockTarget {
@@ -101,7 +102,7 @@ contract ECDSAExecutorTest is Test {
         (owner, ownerKey) = makeAddrAndKey("owner");
         
         // Install the ECDSA executor module
-        bytes memory installData = abi.encodePacked(owner);
+        bytes memory installData = abi.encode(owner);
         account.installModule(MODULE_TYPE_EXECUTOR, address(executor), installData);
     }
 
@@ -113,7 +114,7 @@ contract ECDSAExecutorTest is Test {
         assertFalse(executor.isInitialized(address(account)));
         
         // Now test install with event
-        bytes memory installData = abi.encodePacked(owner);
+        bytes memory installData = abi.encode(owner);
         
         // Expect the OwnerRegistered event
         vm.expectEmit(true, true, false, true, address(executor));
@@ -128,46 +129,68 @@ contract ECDSAExecutorTest is Test {
     function testExecuteWithValidSignature() public {
         uint256 newValue = 42;
         bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
-        
+
         ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
         bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
-        
+
         uint256 nonce = 0; // Using key 0, sequence 0
         uint256 expiration = block.timestamp + 1 hours;
-        
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, nonce, expiration, block.chainid)
+
+        // Build EIP-712 digest
+        bytes32 digest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
-        
+
         executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
-        
+
         assertEq(target.getValue(), newValue);
     }
 
-    function testExecuteWithEIP191Signature() public {
-        uint256 newValue = 99;
-        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
-        
-        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
-        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
-        
-        uint256 nonce = 0; // Using key 0, sequence 0
-        uint256 expiration = block.timestamp + 1 hours;
-        
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, nonce, expiration, block.chainid)
+    function _getEIP712Digest(
+        address account,
+        ExecMode mode,
+        bytes memory executionCalldata,
+        uint256 nonce,
+        uint256 expiration
+    ) internal view returns (bytes32) {
+        // Compute EIP-712 digest matching Solady's EIP712 implementation
+        bytes32 DOMAIN_TYPEHASH = 0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f;
+        bytes32 EXECUTE_TYPEHASH = keccak256(
+            "Execute(address account,uint256 mode,bytes executionCalldata,uint256 nonce,uint256 expiration)"
         );
-        bytes32 ethHash = ECDSA.toEthSignedMessageHash(executionHash);
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, ethHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
-        
-        executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
-        
-        assertEq(target.getValue(), newValue);
+
+        // Build domain separator matching Solady's approach
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                DOMAIN_TYPEHASH,
+                keccak256("ECDSAExecutor"),
+                keccak256("1"),
+                block.chainid,
+                address(executor)
+            )
+        );
+
+        // Build struct hash
+        bytes32 structHash = keccak256(
+            abi.encode(
+                EXECUTE_TYPEHASH,
+                account,
+                ExecMode.unwrap(mode),
+                keccak256(executionCalldata),
+                nonce,
+                expiration
+            )
+        );
+
+        // Combine into final digest
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
     function testExecuteWithInvalidSignature() public {
@@ -181,11 +204,15 @@ contract ECDSAExecutorTest is Test {
         uint256 nonce = 0; // Using key 0, sequence 0
         uint256 expiration = block.timestamp + 1 hours;
         
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, nonce, expiration, block.chainid)
+        bytes32 digest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wrongKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wrongKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.InvalidSignature.selector));
@@ -229,11 +256,15 @@ contract ECDSAExecutorTest is Test {
         uint256 nonce = 0; // Using key 0, sequence 0
         uint256 expiration = block.timestamp + 1 hours;
         
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, nonce, expiration, block.chainid)
+        bytes32 digest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
@@ -252,11 +283,15 @@ contract ECDSAExecutorTest is Test {
         uint256 wrongNonce = 1; // Should be 0 for first transaction
         uint256 expiration = block.timestamp + 1 hours;
         
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, wrongNonce, expiration, block.chainid)
+        bytes32 digest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            wrongNonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.InvalidNonce.selector, address(account), 0, wrongNonce));
@@ -275,10 +310,14 @@ contract ECDSAExecutorTest is Test {
             abi.encodeWithSelector(MockTarget.setValue.selector, 100)
         );
         
-        bytes32 executionHash1 = keccak256(
-            abi.encode(address(account), mode, executionCalldata1, nonce1, expiration, block.chainid)
+        bytes32 digest1 = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata1,
+            nonce1,
+            expiration
         );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash1);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest1);
         
         executor.execute(address(account), mode, executionCalldata1, nonce1, expiration, abi.encodePacked(r, s, v));
         assertEq(target.getValue(), 100);
@@ -291,10 +330,14 @@ contract ECDSAExecutorTest is Test {
             abi.encodeWithSelector(MockTarget.setValue.selector, 200)
         );
         
-        bytes32 executionHash2 = keccak256(
-            abi.encode(address(account), mode, executionCalldata2, nonce2, expiration, block.chainid)
+        bytes32 digest2 = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata2,
+            nonce2,
+            expiration
         );
-        (v, r, s) = vm.sign(ownerKey, executionHash2);
+        (v, r, s) = vm.sign(ownerKey, digest2);
         
         executor.execute(address(account), mode, executionCalldata2, nonce2, expiration, abi.encodePacked(r, s, v));
         assertEq(target.getValue(), 200);
@@ -335,11 +378,15 @@ contract ECDSAExecutorTest is Test {
         uint256 nonce = 0;
         uint256 expiration = block.timestamp + 1 hours;
         
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, nonce, expiration, block.chainid)
+        bytes32 digest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         // First execution should succeed
@@ -361,11 +408,15 @@ contract ECDSAExecutorTest is Test {
         uint256 nonce = 0;
         uint256 expiration = block.timestamp - 1; // Already expired
         
-        bytes32 executionHash = keccak256(
-            abi.encode(address(account), mode, executionCalldata, nonce, expiration, block.chainid)
+        bytes32 digest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         // Should revert with SignatureExpired error
@@ -378,7 +429,7 @@ contract ECDSAExecutorTest is Test {
         MockAccount newAccount = new MockAccount();
         
         // Try to install with zero address as owner
-        bytes memory invalidInstallData = abi.encodePacked(address(0));
+        bytes memory invalidInstallData = abi.encode(address(0));
         
         vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.InvalidOwner.selector));
         newAccount.installModule(MODULE_TYPE_EXECUTOR, address(executor), invalidInstallData);
@@ -429,11 +480,15 @@ contract ECDSAExecutorTest is Test {
         uint256 nonce = 0;
         uint256 expiration = block.timestamp + 1 hours;
         
-        bytes32 executionHash = keccak256(
-            abi.encode(address(newAccount), mode, executionCalldata, nonce, expiration, block.chainid)
+        bytes32 digest = _getEIP712Digest(
+            address(newAccount),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
         );
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, executionHash);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         // Should revert because account is not initialized
