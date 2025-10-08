@@ -68,9 +68,9 @@ contract ECDSAExecutor is IExecutor, EIP712 {
         return (uint256(key) << 64) | sequence;
     }
 
-    function _unpackNonce(uint256 nonce) internal pure returns (uint192 key, uint256 sequence) {
+    function _unpackNonce(uint256 nonce) internal pure returns (uint192 key, uint64 sequence) {
         key = uint192(nonce >> 64);
-        sequence = uint256(uint64(nonce));
+        sequence = uint64(nonce);
     }
 
     function incrementNonce(uint192 key) external {
