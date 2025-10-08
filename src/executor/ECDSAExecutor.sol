@@ -128,7 +128,7 @@ contract ECDSAExecutor is IExecutor, EIP712 {
         if (sequence != expectedSequence) {
             revert InvalidNonce(account, _packNonce(key, expectedSequence), nonce);
         }
-        ecdsaExecutorStorage[account].nonceSequenceNumber[key] = uint64(sequence + 1);
+        ecdsaExecutorStorage[account].nonceSequenceNumber[key] = sequence + 1;
     }
 
     function _domainNameAndVersion()
