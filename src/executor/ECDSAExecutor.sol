@@ -119,7 +119,7 @@ contract ECDSAExecutor is IExecutor, EIP712 {
             revert InvalidSignature();
         }
 
-        return IERC7579Account(account).executeFromExecutor(mode, executionCalldata);
+        return IERC7579Account(account).executeFromExecutor{value: msg.value}(mode, executionCalldata);
     }
     
     function _validateAndUpdateNonce(address account, uint256 nonce) internal {
