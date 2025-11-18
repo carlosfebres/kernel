@@ -495,4 +495,130 @@ contract ECDSAExecutorTest is Test {
         vm.expectRevert(abi.encodeWithSelector(IModule.NotInitialized.selector, address(newAccount)));
         executor.execute(address(newAccount), mode, executionCalldata, nonce, expiration, signature);
     }
+
+    function testSignatureMalleability() public {
+        uint256 newValue = 42;
+        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
+
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 1 hours;
+
+        bytes32 digest = _getEIP712Digest(address(account), mode, executionCalldata, nonce, expiration);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+
+        // Create malleable signature (s' = N - s)
+        uint256 N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
+        bytes32 malleableS = bytes32(N - uint256(s));
+        uint8 malleableV = v == 27 ? 28 : 27;
+
+        bytes memory malleableSignature = abi.encodePacked(r, malleableS, malleableV);
+
+        vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.MalleableSignature.selector));
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, malleableSignature);
+    }
+
+    function testMaximumExpiration() public {
+        uint256 newValue = 42;
+        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
+
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 31 days; // Too far in future
+
+        bytes32 digest = _getEIP712Digest(address(account), mode, executionCalldata, nonce, expiration);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.ExpirationTooFar.selector, expiration));
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
+    }
+
+    function testOwnerTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        // Only account can transfer ownership
+        vm.expectRevert(abi.encodeWithSelector(IModule.NotInitialized.selector, address(this)));
+        executor.transferOwnership(newOwner);
+
+        // Account transfers ownership
+        vm.prank(address(account));
+        vm.expectEmit(true, true, true, true);
+        emit ECDSAExecutor.OwnerTransferred(address(account), owner, newOwner);
+        executor.transferOwnership(newOwner);
+
+        assertEq(executor.getOwner(address(account)), newOwner);
+
+        // Cannot transfer to zero address
+        vm.prank(address(account));
+        vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.InvalidOwner.selector));
+        executor.transferOwnership(address(0));
+    }
+
+    function testNonceIncrementEvent() public {
+        uint192 key = 5;
+
+        vm.prank(address(account));
+        vm.expectEmit(true, true, false, true);
+        emit ECDSAExecutor.NonceIncremented(address(account), key, 1);
+        executor.incrementNonce(key);
+
+        assertEq(executor.getNonce(address(account), key), 1);
+    }
+
+    function testZeroAddressAccount() public {
+        uint256 newValue = 42;
+        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
+
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 1 hours;
+
+        bytes32 digest = _getEIP712Digest(address(0), mode, executionCalldata, nonce, expiration);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.InvalidAccount.selector));
+        executor.execute(address(0), mode, executionCalldata, nonce, expiration, signature);
+    }
+
+    function testDeriveNonceKey() public {
+        bytes32 salt1 = keccak256("channel1");
+        bytes32 salt2 = keccak256("channel2");
+
+        uint192 key1 = executor.deriveNonceKey(salt1);
+        uint192 key2 = executor.deriveNonceKey(salt2);
+
+        // Keys should be different for different salts
+        assertTrue(key1 != key2);
+
+        // Keys should be deterministic
+        assertEq(key1, executor.deriveNonceKey(salt1));
+    }
+}
+
+contract MaliciousReentrant {
+    ECDSAExecutor executor;
+    bool attacked;
+
+    constructor(ECDSAExecutor _executor) {
+        executor = _executor;
+    }
+
+    function attack() external {
+        if (!attacked) {
+            attacked = true;
+            // Attempt reentrancy
+            executor.execute(address(this), ExecMode.wrap(0), "", 0, 0, "");
+        }
+    }
 }
