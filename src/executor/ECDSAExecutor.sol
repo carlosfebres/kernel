@@ -26,6 +26,12 @@ struct ECDSAExecutorStorage {
  * - Time-bound signatures with maximum 30-day validity
  * - Signature malleability protection
  * - Reentrancy guard protection
+ * - Nonce preservation across reinstalls (prevents replay attacks)
+ *
+ * Nonce Behavior:
+ * - "Replay-until-success" semantics: nonces only consumed on successful execution
+ * - Failed executions allow retries with the same signature
+ * - Nonces preserved across uninstall/reinstall to prevent replay attacks
  */
 contract ECDSAExecutor is IExecutor, EIP712, ReentrancyGuard {
     error InvalidNonce(address account, uint256 expected, uint256 actual);
@@ -35,9 +41,10 @@ contract ECDSAExecutor is IExecutor, EIP712, ReentrancyGuard {
     error InvalidAccount();
     error MalleableSignature();
     error ExpirationTooFar(uint256 expiration);
+    error SequenceOverflow(address account, uint192 key);
 
     bytes32 constant EXECUTE_TYPEHASH = keccak256(
-        "Execute(address account,uint256 mode,bytes executionCalldata,uint256 nonce,uint256 expiration)"
+        "Execute(address account,bytes32 mode,bytes executionCalldata,uint256 nonce,uint256 expiration)"
     );
     uint256 constant MAX_EXPIRATION_DURATION = 30 days;
     
@@ -66,7 +73,10 @@ contract ECDSAExecutor is IExecutor, EIP712, ReentrancyGuard {
     function onUninstall(bytes calldata) external payable override {
         if (!_isInitialized(msg.sender)) revert NotInitialized(msg.sender);
         address owner = ecdsaExecutorStorage[msg.sender].owner;
-        delete ecdsaExecutorStorage[msg.sender];
+
+        // FIX: Only delete owner, preserve nonces to prevent replay attacks
+        delete ecdsaExecutorStorage[msg.sender].owner;
+
         emit OwnerUnregistered(msg.sender, owner);
     }
 
@@ -130,8 +140,36 @@ contract ECDSAExecutor is IExecutor, EIP712, ReentrancyGuard {
     function incrementNonce(uint192 key) external {
         // Only the account itself can increment its nonce
         if (!_isInitialized(msg.sender)) revert NotInitialized(msg.sender);
+
+        uint64 currentSequence = ecdsaExecutorStorage[msg.sender].nonceSequenceNumber[key];
+        if (currentSequence == type(uint64).max) {
+            revert SequenceOverflow(msg.sender, key);
+        }
+
         ecdsaExecutorStorage[msg.sender].nonceSequenceNumber[key]++;
         emit NonceIncremented(msg.sender, key, ecdsaExecutorStorage[msg.sender].nonceSequenceNumber[key]);
+    }
+
+    /// @notice Allows an owner to invalidate nonces for their account
+    /// @dev Owner must specify the account address they own
+    ///      This enables emergency signature cancellation by the owner
+    /// @param account The smart account whose nonce should be incremented
+    /// @param key The nonce key to increment
+    function invalidateNonce(address account, uint192 key) external {
+        if (!_isInitialized(account)) revert NotInitialized(account);
+
+        address owner = ecdsaExecutorStorage[account].owner;
+        if (msg.sender != owner) {
+            revert InvalidOwner(); // Caller is not the owner
+        }
+
+        uint64 currentSequence = ecdsaExecutorStorage[account].nonceSequenceNumber[key];
+        if (currentSequence == type(uint64).max) {
+            revert SequenceOverflow(account, key);
+        }
+
+        ecdsaExecutorStorage[account].nonceSequenceNumber[key]++;
+        emit NonceIncremented(account, key, ecdsaExecutorStorage[account].nonceSequenceNumber[key]);
     }
 
     /// @notice Derives a deterministic nonce key from a purpose identifier
@@ -142,6 +180,53 @@ contract ECDSAExecutor is IExecutor, EIP712, ReentrancyGuard {
         return uint192(uint256(keccak256(abi.encodePacked("ECDSAExecutor", purposeSalt))) >> 64);
     }
 
+    /// @notice Computes the EIP-712 typed data hash for an execution request
+    /// @dev This helper function is provided for off-chain signature generation
+    /// @param account The smart account address
+    /// @param mode The execution mode (ExecMode type will be unwrapped to bytes32)
+    /// @param executionCalldata The encoded execution data
+    /// @param nonce The 2D nonce (192-bit key + 64-bit sequence)
+    /// @param expiration The signature expiration timestamp
+    /// @return The EIP-712 digest ready for signing
+    function getExecuteTypedDataHash(
+        address account,
+        ExecMode mode,
+        bytes calldata executionCalldata,
+        uint256 nonce,
+        uint256 expiration
+    ) external view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                EXECUTE_TYPEHASH,
+                account,
+                ExecMode.unwrap(mode),
+                keccak256(executionCalldata),
+                nonce,
+                expiration
+            )
+        );
+        return _hashTypedData(structHash);
+    }
+
+    /// @notice Executes a transaction on behalf of the smart account with ECDSA signature authorization
+    /// @dev Nonce Semantics: This implementation uses "replay-until-success" behavior.
+    ///      The nonce is incremented before the external call to the smart account.
+    ///      If the external call reverts, the entire transaction reverts, rolling back the nonce increment.
+    ///      This means the same signed transaction can be retried indefinitely until it succeeds.
+    ///
+    ///      Security Implications:
+    ///      - Signatures remain valid until successfully executed (not single-use on failure)
+    ///      - Failed transactions do not consume the nonce
+    ///      - Users should set appropriate expiration times to limit retry windows
+    ///      - Signatures can be invalidated by calling incrementNonce() from the account
+    ///
+    /// @param account The smart account to execute on behalf of
+    /// @param mode The execution mode (single or batch) as defined in ERC-7579
+    /// @param executionCalldata The encoded execution data
+    /// @param nonce The 2D nonce (192-bit key + 64-bit sequence)
+    /// @param expiration The timestamp after which the signature expires (max 30 days)
+    /// @param signature The ECDSA signature from the account owner
+    /// @return returnData The return data from the executed transaction
     function execute(
         address account,
         ExecMode mode,
@@ -196,9 +281,16 @@ contract ECDSAExecutor is IExecutor, EIP712, ReentrancyGuard {
     function _validateAndUpdateNonce(address account, uint256 nonce) internal {
         (uint192 key, uint256 sequence) = _unpackNonce(nonce);
         uint64 expectedSequence = ecdsaExecutorStorage[account].nonceSequenceNumber[key];
+
         if (sequence != expectedSequence) {
             revert InvalidNonce(account, _packNonce(key, expectedSequence), nonce);
         }
+
+        // Check for overflow before incrementing
+        if (expectedSequence == type(uint64).max) {
+            revert SequenceOverflow(account, key);
+        }
+
         ecdsaExecutorStorage[account].nonceSequenceNumber[key] = uint64(sequence + 1);
         emit NonceIncremented(account, key, uint64(sequence + 1));
     }

@@ -163,7 +163,7 @@ contract ECDSAExecutorTest is Test {
         // Compute EIP-712 digest matching Solady's EIP712 implementation
         bytes32 DOMAIN_TYPEHASH = 0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f;
         bytes32 EXECUTE_TYPEHASH = keccak256(
-            "Execute(address account,uint256 mode,bytes executionCalldata,uint256 nonce,uint256 expiration)"
+            "Execute(address account,bytes32 mode,bytes executionCalldata,uint256 nonce,uint256 expiration)"
         );
 
         // Build domain separator matching Solady's approach
@@ -603,6 +603,195 @@ contract ECDSAExecutorTest is Test {
 
         // Keys should be deterministic
         assertEq(key1, executor.deriveNonceKey(salt1));
+    }
+
+    function testNoncePreservationAfterUninstall() public {
+        // Execute one transaction to increment nonce
+        uint256 newValue = 42;
+        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 1 hours;
+
+        bytes32 digest = _getEIP712Digest(address(account), mode, executionCalldata, nonce, expiration);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, abi.encodePacked(r, s, v));
+
+        // Verify nonce is now 1
+        assertEq(executor.getNonce(address(account), 0), 1);
+
+        // Uninstall the executor
+        vm.prank(address(account));
+        account.uninstallModule(MODULE_TYPE_EXECUTOR, address(executor), bytes(""));
+
+        // Verify module is not initialized
+        assertFalse(executor.isInitialized(address(account)));
+
+        // Verify nonce is still 1 (preserved!)
+        assertEq(executor.getNonce(address(account), 0), 1);
+
+        // Reinstall with new owner
+        address newOwner;
+        uint256 newOwnerKey;
+        (newOwner, newOwnerKey) = makeAddrAndKey("newOwner");
+
+        vm.prank(address(account));
+        bytes memory installData = abi.encode(newOwner);
+        account.installModule(MODULE_TYPE_EXECUTOR, address(executor), installData);
+
+        // Verify nonce is STILL 1 (not reset)
+        assertEq(executor.getNonce(address(account), 0), 1);
+
+        // Old signature should not work (nonce mismatch)
+        vm.expectRevert();
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, abi.encodePacked(r, s, v));
+
+        // New signature with nonce=1 should work
+        nonce = 1;
+        digest = _getEIP712Digest(address(account), mode, executionCalldata, nonce, expiration);
+        (v, r, s) = vm.sign(newOwnerKey, digest);
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, abi.encodePacked(r, s, v));
+
+        assertEq(target.getValue(), newValue);
+        assertEq(executor.getNonce(address(account), 0), 2);
+    }
+
+    function testReplayUntilSuccess() public {
+        // Create a target that will fail then succeed
+        MockFailingTarget failingTarget = new MockFailingTarget();
+
+        bytes memory callData = abi.encodeWithSelector(MockFailingTarget.setValue.selector, 42);
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(failingTarget), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 1 hours;
+
+        bytes32 digest = _getEIP712Digest(address(account), mode, executionCalldata, nonce, expiration);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // First call fails - nonce should NOT be consumed
+        vm.expectRevert("Execution failed");
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
+
+        // Nonce should still be 0
+        assertEq(executor.getNonce(address(account), 0), 0);
+
+        // Make the target succeed on next call
+        failingTarget.setShouldFail(false);
+
+        // Same signature should work now (replay-until-success)
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
+
+        // Now nonce should be consumed
+        assertEq(executor.getNonce(address(account), 0), 1);
+        assertEq(failingTarget.value(), 42);
+    }
+
+    function testOwnerCanInvalidateNonce() public {
+        // Owner calls invalidateNonce directly
+        vm.prank(owner);
+        vm.expectEmit(true, true, false, true);
+        emit ECDSAExecutor.NonceIncremented(address(account), 0, 1);
+        executor.invalidateNonce(address(account), 0);
+
+        assertEq(executor.getNonce(address(account), 0), 1);
+    }
+
+    function testNonOwnerCannotInvalidateNonce() public {
+        address notOwner = makeAddr("notOwner");
+
+        vm.prank(notOwner);
+        vm.expectRevert(abi.encodeWithSelector(ECDSAExecutor.InvalidOwner.selector));
+        executor.invalidateNonce(address(account), 0);
+    }
+
+    function testAccountCanStillIncrementNonce() public {
+        // Original incrementNonce still works for account
+        vm.prank(address(account));
+        executor.incrementNonce(0);
+
+        assertEq(executor.getNonce(address(account), 0), 1);
+    }
+
+    function testOwnerInvalidatesSignature() public {
+        // Create a signature
+        uint256 newValue = 42;
+        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 1 hours;
+
+        bytes32 digest = _getEIP712Digest(address(account), mode, executionCalldata, nonce, expiration);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // Owner invalidates the nonce
+        vm.prank(owner);
+        executor.invalidateNonce(address(account), 0);
+
+        // Signature should now fail (nonce mismatch)
+        vm.expectRevert();
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, signature);
+    }
+
+    function testGetExecuteTypedDataHashMatchesInternal() public {
+        uint256 newValue = 42;
+        bytes memory callData = abi.encodeWithSelector(MockTarget.setValue.selector, newValue);
+        ExecMode mode = ExecLib.encode(CALLTYPE_SINGLE, EXECTYPE_DEFAULT, EXEC_MODE_DEFAULT, ExecModePayload.wrap(0));
+        bytes memory executionCalldata = ExecLib.encodeSingle(address(target), 0, callData);
+
+        uint256 nonce = 0;
+        uint256 expiration = block.timestamp + 1 hours;
+
+        // Get digest from new helper function
+        bytes32 helperDigest = executor.getExecuteTypedDataHash(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
+        );
+
+        // Get digest from test helper (should match)
+        bytes32 testDigest = _getEIP712Digest(
+            address(account),
+            mode,
+            executionCalldata,
+            nonce,
+            expiration
+        );
+
+        // They should be identical
+        assertEq(helperDigest, testDigest);
+
+        // Verify it works for execution
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, helperDigest);
+        executor.execute(address(account), mode, executionCalldata, nonce, expiration, abi.encodePacked(r, s, v));
+
+        assertEq(target.getValue(), newValue);
+    }
+}
+
+// Mock contract for failing target
+contract MockFailingTarget {
+    uint256 public value;
+    bool private shouldFail = true;
+
+    function setValue(uint256 _value) external {
+        if (shouldFail) {
+            revert("Intentional failure");
+        }
+        value = _value;
+    }
+
+    function setShouldFail(bool _shouldFail) external {
+        shouldFail = _shouldFail;
     }
 }
 
