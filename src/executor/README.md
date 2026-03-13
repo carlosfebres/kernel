@@ -43,6 +43,25 @@ This design enables:
 - Parallel transaction processing without nonce conflicts
 - Efficient gas usage through bit packing
 
+### Nonce Consumption Behavior
+
+The ECDSAExecutor implements **"replay-until-success"** nonce semantics:
+
+- ✅ **Successful execution**: Nonce is consumed, signature cannot be reused
+- ❌ **Failed execution**: Nonce is NOT consumed, same signature can be retried
+- ⏱️ **Expiration**: Signatures expire after specified timestamp (max 30 days)
+- 🔒 **Nonce preservation**: Nonces survive module uninstall/reinstall cycles
+
+**Use Cases:**
+- Allows automatic retries of failed transactions without new signatures
+- Useful for gas price fluctuations or temporary smart contract states
+- Owner can invalidate pending signatures by calling `incrementNonce()`
+
+**Security Considerations:**
+- Set reasonable expiration times to limit retry windows
+- Monitor for pending signatures that may execute unexpectedly
+- Use nonce invalidation if a signature needs to be cancelled
+
 ## Usage
 
 ### Installation
@@ -61,7 +80,7 @@ uint256 nonce = 0; // Key 0, sequence 0
 uint256 expiration = block.timestamp + 1 hours;
 
 // 2. Create EIP-712 signature (off-chain)
-bytes32 digest = executor.getEIP712Digest(
+bytes32 digest = executor.getExecuteTypedDataHash(
     account,
     mode,
     executionCalldata,
@@ -80,6 +99,8 @@ executor.execute(
     signature
 );
 ```
+
+**Note**: The executor uses "replay-until-success" nonce semantics. If the execution fails, the nonce is NOT consumed, allowing you to retry the same signature. Set appropriate expiration times to limit the retry window.
 
 ### Parallel Nonces Example
 ```solidity
